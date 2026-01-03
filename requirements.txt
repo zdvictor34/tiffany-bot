@@ -1,4 +1,14 @@
+# Librería principal de Telegram Bot
 python-telegram-bot==20.3
-stripe==6.0.0
-Flask==2.3.3
 
+# Flask para webhooks y servidor
+Flask>=2.3.3,<3.0
+
+# Stripe para pagos
+stripe==6.0.0
+
+# Requests, útil si tu bot hace llamadas HTTP
+requests>=2.31.0
+
+# Optional: para entorno async/await en Python 3.11
+aiohttp>=3.9.5
