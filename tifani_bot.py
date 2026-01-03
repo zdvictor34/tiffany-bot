@@ -1,16 +1,23 @@
 import os
+import asyncio
+import logging
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackContext
 import stripe
 from webhook import subscriptions, GROUP_ID  # Suscripciones y grupo VIP
 
 # -----------------------------
-# CARGAR VARIABLES DEL .env
+# CONFIGURACION BASICA
 # -----------------------------
 load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 stripe.api_key = os.getenv("STRIPE_API_KEY")
+
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 
 # -----------------------------
 # FUNCION PARA CREAR CHECKOUT
@@ -47,16 +54,15 @@ async def enviar_boton_vip(update: Update, checkout_url: str = None):
     )
 
 # -----------------------------
-# FUNCION /START
+# COMANDO /START
 # -----------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Solo envía el mensaje para que el usuario use /vip
     await update.message.reply_text(
         "¡Bienvenido! Escribe /vip para proceder al pago y acceder al canal VIP."
     )
 
 # -----------------------------
-# FUNCION /VIP
+# COMANDO /VIP
 # -----------------------------
 async def vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     telegram_id = update.message.from_user.id
@@ -65,10 +71,10 @@ async def vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await enviar_boton_vip(update, checkout_url)
     except Exception as e:
         await update.message.reply_text("❌ Error al generar el pago. Revisa Stripe.")
-        print("ERROR STRIPE:", e)
+        logging.error("ERROR STRIPE: %s", e)
 
 # -----------------------------
-# FUNCION /CONFIRMAR
+# COMANDO /CONFIRMAR
 # -----------------------------
 async def confirmar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.message.from_user.id)
@@ -78,17 +84,29 @@ async def confirmar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("No se ha recibido tu pago aún 💳")
 
 # -----------------------------
-# INICIAR BOT
+# MANEJADOR DE ERRORES GLOBAL
+# -----------------------------
+async def error_handler(update: object, context: CallbackContext):
+    logging.error(msg="Exception while handling an update:", exc_info=context.error)
+
+# -----------------------------
+# INICIAR BOT (con reinicio automático)
 # -----------------------------
 def main():
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    while True:
+        try:
+            app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("vip", vip))
-    app.add_handler(CommandHandler("confirmar", confirmar))
+            app.add_handler(CommandHandler("start", start))
+            app.add_handler(CommandHandler("vip", vip))
+            app.add_handler(CommandHandler("confirmar", confirmar))
+            app.add_error_handler(error_handler)
 
-    print("Tiffany InviteMemberBot está en línea... 🤖")
-    app.run_polling()
+            print("Tiffany InviteMemberBot está en línea... 🤖")
+            app.run_polling()
+        except Exception as e:
+            logging.error("ERROR CRITICO, reiniciando bot: %s", e)
+            asyncio.sleep(5)  # Espera 5 segundos antes de reiniciar
 
 if __name__ == "__main__":
     main()
