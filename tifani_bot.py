@@ -1,5 +1,4 @@
 import os
-import asyncio
 import logging
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -8,20 +7,23 @@ import stripe
 from webhook import subscriptions, GROUP_ID  # Suscripciones y grupo VIP
 
 # -----------------------------
-# CONFIGURACION BASICA
+# CONFIGURACIÓN
 # -----------------------------
 load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 stripe.api_key = os.getenv("STRIPE_API_KEY")
 
+# Configuración de logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 
 # -----------------------------
-# FUNCION PARA CREAR CHECKOUT
+# FUNCIONES DEL BOT
 # -----------------------------
+
+# Crear sesión de pago Stripe
 def crear_sesion_checkout(telegram_id):
     session = stripe.checkout.Session.create(
         payment_method_types=["card"],
@@ -36,9 +38,7 @@ def crear_sesion_checkout(telegram_id):
     )
     return session.url
 
-# -----------------------------
-# FUNCION PARA ENVIAR BOTON VIP
-# -----------------------------
+# Enviar botón VIP
 async def enviar_boton_vip(update: Update, checkout_url: str = None):
     if checkout_url is None:
         checkout_url = "https://t.me/TiffanyOficialBot?start=vip"
@@ -53,17 +53,13 @@ async def enviar_boton_vip(update: Update, checkout_url: str = None):
         reply_markup=reply_markup
     )
 
-# -----------------------------
-# COMANDO /START
-# -----------------------------
+# Comando /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "¡Bienvenido! Escribe /vip para proceder al pago y acceder al canal VIP."
     )
 
-# -----------------------------
-# COMANDO /VIP
-# -----------------------------
+# Comando /vip
 async def vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     telegram_id = update.message.from_user.id
     try:
@@ -73,9 +69,7 @@ async def vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Error al generar el pago. Revisa Stripe.")
         logging.error("ERROR STRIPE: %s", e)
 
-# -----------------------------
-# COMANDO /CONFIRMAR
-# -----------------------------
+# Comando /confirmar
 async def confirmar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.message.from_user.id)
     if subscriptions.get(user_id):
@@ -83,30 +77,25 @@ async def confirmar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("No se ha recibido tu pago aún 💳")
 
-# -----------------------------
-# MANEJADOR DE ERRORES GLOBAL
-# -----------------------------
+# Manejador de errores global
 async def error_handler(update: object, context: CallbackContext):
     logging.error(msg="Exception while handling an update:", exc_info=context.error)
 
 # -----------------------------
-# INICIAR BOT (con reinicio automático)
+# INICIAR BOT
 # -----------------------------
 def main():
-    while True:
-        try:
-            app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-            app.add_handler(CommandHandler("start", start))
-            app.add_handler(CommandHandler("vip", vip))
-            app.add_handler(CommandHandler("confirmar", confirmar))
-            app.add_error_handler(error_handler)
+    # Comandos
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("vip", vip))
+    app.add_handler(CommandHandler("confirmar", confirmar))
+    app.add_error_handler(error_handler)
 
-            print("Tiffany InviteMemberBot está en línea... 🤖")
-            app.run_polling()
-        except Exception as e:
-            logging.error("ERROR CRITICO, reiniciando bot: %s", e)
-            asyncio.sleep(5)  # Espera 5 segundos antes de reiniciar
+    print("Tiffany InviteMemberBot está en línea... 🤖")
+    # run_polling maneja reconexión automática
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
