@@ -19,10 +19,10 @@ def crear_sesion_checkout(telegram_id):
     session = stripe.checkout.Session.create(
         payment_method_types=["card"],
         line_items=[{
-            "price": "price_1SiLnREvKUSsN6hkkTYzkB1M",  # Reemplaza con tu price_id
+            "price": "price_1SiLnREvKUSsN6hkkTYzkB1M",  # Reemplaza con tu price ID
             "quantity": 1
         }],
-        mode="subscription",  # Suscripción mensual
+        mode="subscription",
         success_url="https://t.me/TiffanyOficialBot",
         cancel_url="https://t.me/TiffanyOficialBot",
         client_reference_id=str(telegram_id)
@@ -35,34 +35,41 @@ def crear_sesion_checkout(telegram_id):
 async def enviar_boton_vip(update: Update, checkout_url: str = None):
     if checkout_url is None:
         checkout_url = "https://t.me/TiffanyOficialBot?start=vip"
-    
+
     keyboard = [
         [InlineKeyboardButton("Accede al canal VIP aquí", url=checkout_url)]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
+
     await update.message.reply_text(
-        "¡Haz clic en el botón para hablar con Tiffany y suscribirte al canal VIP!",
+        "¡Haz clic en el botón para suscribirte al canal VIP!",
         reply_markup=reply_markup
     )
 
 # -----------------------------
-# HANDLERS DE TELEGRAM
+# FUNCION /START
 # -----------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await enviar_boton_vip(update)
+    # Solo envía el mensaje para que el usuario use /vip
+    await update.message.reply_text(
+        "¡Bienvenido! Escribe /vip para proceder al pago y acceder al canal VIP."
+    )
 
+# -----------------------------
+# FUNCION /VIP
+# -----------------------------
 async def vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     telegram_id = update.message.from_user.id
     try:
         checkout_url = crear_sesion_checkout(telegram_id)
         await enviar_boton_vip(update, checkout_url)
     except Exception as e:
-        await update.message.reply_text(
-            "❌ Error al generar el pago. Revisa Stripe."
-        )
+        await update.message.reply_text("❌ Error al generar el pago. Revisa Stripe.")
         print("ERROR STRIPE:", e)
 
+# -----------------------------
+# FUNCION /CONFIRMAR
+# -----------------------------
 async def confirmar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.message.from_user.id)
     if subscriptions.get(user_id):
@@ -76,7 +83,6 @@ async def confirmar(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-    # Comandos
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("vip", vip))
     app.add_handler(CommandHandler("confirmar", confirmar))
