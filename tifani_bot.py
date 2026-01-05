@@ -66,8 +66,10 @@ async def vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
         checkout_url = crear_sesion_checkout(telegram_id)
         await enviar_boton_vip(update, checkout_url)
     except Exception as e:
-        await update.message.reply_text("❌ Error al generar el pago. Revisa Stripe.")
-        logging.error("ERROR STRIPE: %s", e)
+        await update.message.reply_text(
+            f"❌ Error Stripe:\n{str(e)}"
+        )
+        raise e
 
 # Comando /confirmar
 async def confirmar(update: Update, context: ContextTypes.DEFAULT_TYPE):
