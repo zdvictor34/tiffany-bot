@@ -1,133 +1,84 @@
 import os
-import json
-from dotenv import load_dotenv
-from flask import Flask, request, jsonify
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import stripe
 import asyncio
-import threading
+from flask import Flask, request
+from telegram import Bot, Update
+from telegram.ext import Application, CommandHandler, ContextTypes
 
-# -----------------------------
-# CARGAR VARIABLES
-# -----------------------------
-load_dotenv()
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-STRIPE_API_KEY = os.getenv("STRIPE_API_KEY")
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+STRIPE_KEY = os.getenv("STRIPE_SECRET_KEY")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
+PRICE_ID = os.getenv("STRIPE_PRICE_ID")
+VIP_GROUP_ID = int(os.getenv("VIP_CHAT_ID"))
 
-VIP_GROUPS = {
-    "jacqueline": os.getenv("VIP_GROUP_ID_JACQUELINE"),
-    "jennifer": os.getenv("VIP_GROUP_ID_JENNIFER")
-}
+stripe.api_key = STRIPE_KEY
 
-PRICES = {
-    "jacqueline": os.getenv("PRICE_JACQUELINE"),
-    "jennifer": os.getenv("PRICE_JENNIFER")
-}
+bot = Bot(token=TOKEN)
+app = Flask(__name__)
+telegram_app = Application.builder().token(TOKEN).build()
 
-stripe.api_key = STRIPE_API_KEY
+# ----------------
+# COMMANDS
+# ----------------
 
-# -----------------------------
-# SUSCRIPCIONES EN MEMORIA
-# -----------------------------
-subscriptions = {}
-
-# -----------------------------
-# FUNCION PARA CREAR CHECKOUT
-# -----------------------------
-def crear_sesion_checkout(telegram_id, modelo):
-    session = stripe.checkout.Session.create(
-        payment_method_types=["card"],
-        line_items=[{"price": PRICES[modelo], "quantity": 1}],
-        mode="subscription",
-        success_url=f"https://t.me/TiffanyOficialBot?start={modelo}",
-        cancel_url=f"https://t.me/TiffanyOficialBot?start={modelo}",
-        client_reference_id=str(telegram_id)
-    )
-    return session.url
-
-# -----------------------------
-# TELEGRAM HANDLERS
-# -----------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Hola, para acceder al canal VIP🔥👅 escribe /vip")
+    await update.message.reply_text("Escribe /vip para entrar 🔥")
 
 async def vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    telegram_id = update.message.from_user.id
-    modelo = "jacqueline"  # default
-    if context.args:
-        arg = context.args[0].lower()
-        if arg in VIP_GROUPS:
-            modelo = arg
-    try:
-        checkout_url = crear_sesion_checkout(telegram_id, modelo)
-        keyboard = [[InlineKeyboardButton("Accede al VIP aquí 🔥", url=checkout_url)]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(
-            "Pulsa el botón para suscribirte:", reply_markup=reply_markup
-        )
-    except Exception as e:
-        await update.message.reply_text("❌ Error al generar el pago. Revisa Stripe.")
-        print("Stripe error:", e)
+    tg_id = update.effective_user.id
 
-async def confirmar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = str(update.message.from_user.id)
-    if subscriptions.get(user_id):
-        await update.message.reply_text("Ya tienes acceso al canal VIP ✅")
-    else:
-        await update.message.reply_text("No se ha recibido tu pago aún 💳")
+    session = stripe.checkout.Session.create(
+        mode="subscription",
+        line_items=[{"price": PRICE_ID, "quantity": 1}],
+        success_url="https://t.me/TU_BOT",
+        cancel_url="https://t.me/TU_BOT",
+        metadata={"telegram_id": tg_id}
+    )
 
-# -----------------------------
-# FLASK APP PARA WEBHOOK STRIPE
-# -----------------------------
-flask_app = Flask(__name__)
+    await update.message.reply_text(session.url)
 
-@flask_app.route("/stripe_webhook", methods=["POST"])
+telegram_app.add_handler(CommandHandler("start", start))
+telegram_app.add_handler(CommandHandler("vip", vip))
+
+# ----------------
+# TELEGRAM WEBHOOK
+# ----------------
+
+@app.route("/telegram", methods=["POST"])
+def telegram_webhook():
+    update = Update.de_json(request.json, bot)
+    asyncio.run(telegram_app.process_update(update))
+    return "ok"
+
+# ----------------
+# STRIPE WEBHOOK
+# ----------------
+
+@app.route("/stripe", methods=["POST"])
 def stripe_webhook():
     payload = request.data
-    sig_header = request.headers.get("Stripe-Signature")
-    try:
-        event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
-    except Exception as e:
-        print("Webhook error:", e)
-        return jsonify(success=False), 400
+    sig = request.headers.get("Stripe-Signature")
 
-    # -----------------------------
-    # Manejar eventos
-    # -----------------------------
+    event = stripe.Webhook.construct_event(
+        payload, sig, STRIPE_WEBHOOK_SECRET
+    )
+
     if event["type"] == "checkout.session.completed":
-        session = event["data"]["object"]
-        telegram_id = session.get("client_reference_id")
-        modelo = session.get("metadata", {}).get("modelo", "jacqueline")
-        if telegram_id:
-            subscriptions[str(telegram_id)] = True
-            print(f"✅ Usuario {telegram_id} pagó modelo {modelo}")
-            # Aquí puedes añadir al grupo VIP si quieres automatizar
-    elif event["type"] == "customer.subscription.deleted":
-        subscription = event["data"]["object"]
-        telegram_id = subscription.get("metadata", {}).get("telegram_id")
-        if telegram_id and telegram_id in subscriptions:
-            subscriptions.pop(telegram_id)
-            print(f"❌ Usuario {telegram_id} canceló la suscripción")
-    return jsonify(success=True)
+        s = event["data"]["object"]
+        tg_id = int(s["metadata"]["telegram_id"])
+        bot.add_chat_members(VIP_GROUP_ID, [tg_id])
 
-# -----------------------------
-# FUNCION PARA LEVANTAR TELEGRAM
-# -----------------------------
-def run_telegram():
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("vip", vip))
-    app.add_handler(CommandHandler("confirmar", confirmar))
-    print("Tiffany Bot Online 🚀")
-    app.run_polling()
+    if event["type"] in ["customer.subscription.deleted", "invoice.payment_failed"]:
+        s = event["data"]["object"]
+        tg_id = int(s["metadata"]["telegram_id"])
+        bot.ban_chat_member(VIP_GROUP_ID, tg_id)
 
-# -----------------------------
-# EJECUTAR TELEGRAM EN HILO PARA FLASK
-# -----------------------------
+    return "ok"
+
+@app.route("/")
+def home():
+    return "online"
+
 if __name__ == "__main__":
-    threading.Thread(target=run_telegram).start()
-    PORT = int(os.getenv("PORT", 8080))
-    flask_app.run(host="0.0.0.0", port=PORT)
+    app.run("0.0.0.0", int(os.getenv("PORT", 8080)))
 
