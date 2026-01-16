@@ -12,7 +12,11 @@ STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
 stripe.api_key = STRIPE_KEY
 bot = Bot(token=TOKEN)
 app = Flask(__name__)
+bot = Bot(token=TOKEN)
+app = Flask(__name__)
+
 telegram_app = Application.builder().token(TOKEN).build()
+
 
 # -------------------
 # MODELOS DÍNAMICOS
