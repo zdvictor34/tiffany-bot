@@ -5,31 +5,48 @@ from flask import Flask, request
 from telegram import Bot, Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
+# -------------------
+# ENV
+# -------------------
+
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 STRIPE_KEY = os.getenv("STRIPE_SECRET_KEY")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
 
 stripe.api_key = STRIPE_KEY
-bot = Bot(token=TOKEN)
-app = Flask(__name__)
+
 bot = Bot(token=TOKEN)
 app = Flask(__name__)
 
 telegram_app = Application.builder().token(TOKEN).build()
 
+# 🔥 ESTO ES CLAVE
+asyncio.get_event_loop().run_until_complete(telegram_app.initialize())
 
 # -------------------
-# MODELOS DÍNAMICOS
+# MODELOS DINÁMICOS
 # -------------------
+# Railway:
+# MODEL_1_SLUG=jennifer
+# MODEL_1_PRICE=price_xxx
+# MODEL_1_GROUP=-100xxxx
+# MODEL_2_SLUG=jacquelin
+# ...
 
-PRICE_TO_GROUP = {}
+MODELS = {}
 i = 1
 while True:
+    slug = os.getenv(f"MODEL_{i}_SLUG")
     price = os.getenv(f"MODEL_{i}_PRICE")
     group = os.getenv(f"MODEL_{i}_GROUP")
-    if not price or not group:
+
+    if not slug or not price or not group:
         break
-    PRICE_TO_GROUP[price] = int(group)
+
+    MODELS[slug] = {
+        "price": price,
+        "group": int(group)
+    }
     i += 1
 
 # -------------------
@@ -37,32 +54,48 @@ while True:
 # -------------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = "Modelos disponibles:\n"
-    for price in PRICE_TO_GROUP:
-        msg += f"/buy_{price}\n"
-    await update.message.reply_text(msg)
+    model = None
 
-async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    command = update.message.text.replace("/buy_", "")
-    price = command
-    tg_id = update.effective_user.id
+    if context.args:
+        model = context.args[0]
+        context.user_data["model"] = model
 
-    if price not in PRICE_TO_GROUP:
-        await update.message.reply_text("Modelo no válido")
+    if model in MODELS:
+        await update.message.reply_text(
+            f"🔥 Acceso VIP {model.capitalize()}\n\n"
+            f"Escribe /vip para suscribirte"
+        )
+    else:
+        msg = "🔥 Modelos disponibles:\n\n"
+        for m in MODELS:
+            msg += f"https://t.me/TiffanyOficialBot?start={m}\n"
+        await update.message.reply_text(msg)
+
+async def vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    model = context.user_data.get("model")
+
+    if model not in MODELS:
+        await update.message.reply_text("Accede desde el link del modelo primero.")
         return
+
+    tg_id = update.effective_user.id
+    price = MODELS[model]["price"]
 
     session = stripe.checkout.Session.create(
         mode="subscription",
         line_items=[{"price": price, "quantity": 1}],
-        success_url="https://t.me/TU_BOT",
-        cancel_url="https://t.me/TU_BOT",
-        metadata={"telegram_id": tg_id, "price": price}
+        success_url=f"https://t.me/TiffanyOficialBot",
+        cancel_url=f"https://t.me/TiffanyOficialBot",
+        metadata={
+            "telegram_id": tg_id,
+            "model": model
+        }
     )
 
     await update.message.reply_text(session.url)
 
 telegram_app.add_handler(CommandHandler("start", start))
-telegram_app.add_handler(CommandHandler("buy", buy))
+telegram_app.add_handler(CommandHandler("vip", vip))
 
 # -------------------
 # TELEGRAM WEBHOOK
@@ -71,7 +104,7 @@ telegram_app.add_handler(CommandHandler("buy", buy))
 @app.route("/telegram", methods=["POST"])
 def telegram_webhook():
     update = Update.de_json(request.json, bot)
-    asyncio.run(telegram_app.process_update(update))
+    telegram_app.update_queue.put_nowait(update)
     return "ok"
 
 # -------------------
@@ -83,14 +116,14 @@ def stripe_webhook():
     payload = request.data
     sig = request.headers.get("Stripe-Signature")
 
-    event = stripe.Webhook.construct_event(payload, sig, STRIPE_WEBHOOK_SECRET)
+    event = stripe.Webhook.construct_event(
+        payload, sig, STRIPE_WEBHOOK_SECRET
+    )
+
     obj = event["data"]["object"]
     tg_id = int(obj["metadata"]["telegram_id"])
-    price = obj["metadata"]["price"]
-    group = PRICE_TO_GROUP.get(price)
-
-    if not group:
-        return "unknown price", 400
+    model = obj["metadata"]["model"]
+    group = MODELS[model]["group"]
 
     if event["type"] == "checkout.session.completed":
         bot.add_chat_members(group, [tg_id])
@@ -110,4 +143,5 @@ def home():
 
 if __name__ == "__main__":
     app.run("0.0.0.0", int(os.getenv("PORT", 8080)))
+
 
