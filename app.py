@@ -84,9 +84,11 @@ def stripe_webhook():
 # -------------------
 # ENDPOINT DE PRUEBA
 # -------------------
-@app.route("/")
-def home():
-    return "Bot online 🚀"
+@app.route("/telegram", methods=["POST"])
+def telegram_webhook():
+    update = Update.de_json(request.json, bot)
+    asyncio.run(telegram_app.process_update(update))
+    return "ok"
 
 # -------------------
 # RUN FLASK
